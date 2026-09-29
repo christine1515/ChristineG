@@ -50,16 +50,40 @@ export async function signUp(
   password: string,
   profile?: SignUpProfile
 ) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
-  if (!error && data.session && profile) {
-    await supabase
+  // 1. Pass profile metadata inside options.data so it is immediately attached to the User object
+  const { data, error } = await supabase.auth.signUp({ 
+    email, 
+    password,
+    options: {
+      data: profile ? {
+        full_name: profile.full_name,
+        role: profile.role,
+      } : undefined,
+    },
+  });
+
+  // 2. Safely grab the user ID whether email confirmation is turned ON or OFF
+  const userId = data?.user?.id || data?.session?.user?.id;
+
+  if (!error && userId && profile) {
+    // 3. Use 'upsert' instead of 'update' so a brand new profile row is forced into the table
+    const { error: profileError } = await supabase
       .from('profiles')
-      .update({ full_name: profile.full_name, role: profile.role })
-      .eq('id', data.session.user.id);
+      .upsert({ 
+        id: userId, 
+        full_name: profile.full_name, 
+        role: profile.role 
+      });
+
+    if (profileError) {
+      console.error('Error writing to public.profiles:', profileError.message);
+    }
   }
+
   if (!error && data.session) {
     setAuth(data.session);
   }
+
   return { data, error };
 }
 
